@@ -78,9 +78,12 @@ def loadImages(res):
     val_out = []
     for f in files:
         image = imread("images/" + f)
-        imshow('wabalaba dubdub', image)
 
         image = reshape(image, res)
+
+        imshow('wabalaba dubdub', rotate_image(image))
+        waitKey(0)
+        destroyAllWindows()
 
         if f.count('val') == 1:
             validation.append(image)
@@ -175,7 +178,6 @@ def filter_concat(name, filters):
 
 def createNetwork(listNames, previous, convolutions, fcnodes):
     branch_prev = None
-    fcs = 0
     filter_list = []
     for name in listNames:
         if name.count('conv'):
@@ -216,11 +218,21 @@ def createNetwork(listNames, previous, convolutions, fcnodes):
             filter_list.append(previous)
             previous = branch_prev
 
-        if name.count('fc'):
-            if len(previous.get_shape()) > 2:
-                previous, num_fea = flatten_layer(previous)
-            fc = createfc(name, previous, fcnodes[fcs])
-            fcs += 1
-            previous = fc
+    previous, num_fea = flatten_layer(previous)
+
+    for fc in fcnodes:
+        previous = createfc('fc' + str(fc), previous, fc)
 
     return previous
+
+
+def rotate_image(image):
+    res = len(image)
+    rotated = np.array()
+    for i in range(res):
+        for j in range(res):
+            rotated[i][j] = image[i][res - j - 1]
+            print res - j - 1
+
+    return rotated
+

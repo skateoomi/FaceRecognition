@@ -28,14 +28,8 @@ if __name__ == "__main__":
         convolutions['conv' + str(i + 1)] = aux
 
     structure = ['branch', 'conv1', 'bootle1', 'tie', 'conv2', 'bootle2', 'tie', 'filter',
-                 'pool1', 'conv3', 'bootle3', 'conv4', 'bottle4', 'pool2', 'fc', 'fc2']
+                 'pool1', 'conv3', 'bootle3', 'conv4', 'bottle4', 'pool2']
     network = createNetwork(structure, inputs, convolutions, [2048, size_output])
-
-    # network, num_fea = flatten_layer(network)
-    #
-    # """FULLY CONNECTED"""
-    # fc = createfc('fc', network, 2048)
-    # fc2 = createfc('fc2', fc, size_output)
 
     """LOSS FUNCTION"""
     softmax = tf.nn.softmax_cross_entropy_with_logits(logits=network, labels=outputs)
