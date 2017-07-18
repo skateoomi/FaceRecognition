@@ -39,11 +39,11 @@ if __name__ == "__main__":
     ypred = tf.argmax(tf.nn.softmax(network), dimension=1)
     accuracy = tf.reduce_mean(tf.cast(tf.equal(ypred, ytrue), tf.float32))
 
-    optimizer = tf.train.GradientDescentOptimizer(1e-10).minimize(loss)
+    optimizer = tf.train.AdamOptimizer(1e-7).minimize(loss)
 
     session.run(tf.global_variables_initializer())
 
-    for epoch in range(200):
+    for epoch in range(2000):
         value = int(floor(random() * num_images))
         mean_acc = 0
         mean_loss = 0
