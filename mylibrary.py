@@ -1,36 +1,31 @@
 import tensorflow as tf
-from cv2 import imread, imshow, waitKey, destroyAllWindows
 import os
 import numpy as np
+from imagehandler import handleImage
 from tensorflow.python.training import moving_averages
 from tensorflow.python.ops import control_flow_ops
 
 
 non_linear = tf.nn.relu
-
-def createWeight(shape):
-    return tf.Variable(tf.truncated_normal(shape, stddev=0.01))
+std_dev = 0.05
 
 
-def createBias(shape):
-    return tf.Variable(tf.constant(0.05, shape=shape))
-
-
-def createfc(name, inputs, num_outputs):
+def createfc(name, inputs, num_outputs, non_linear_use=True):
     num_inputs = inputs.get_shape()[-1]
     with tf.variable_scope(name):
-        weight = tf.get_variable('weight', [num_inputs, num_outputs], tf.float32, tf.random_normal_initializer())
+        weight = tf.get_variable('weight', [num_inputs, num_outputs], tf.float32, tf.random_normal_initializer(stddev=std_dev))
         bias = tf.get_variable('bias', [num_outputs], tf.float32, tf.ones_initializer())
         output = tf.matmul(inputs, weight)
         output += bias
-        output = non_linear(output)
+        if non_linear_use:
+            output = non_linear(output)
     return output
 
 
 def createConvolution(name, inputs, size_filter, num_filters, strides=1, use_relu=True, isTrain=True):
-    shape = [size_filter, size_filter, int(inputs.get_shape()[-1]), num_filters]
+    shape = [size_filter[0], size_filter[1], int(inputs.get_shape()[-1]), num_filters]
     with tf.variable_scope(name):
-        weight = tf.get_variable('weight', shape, tf.float32, tf.random_normal_initializer(0.05))
+        weight = tf.get_variable('weight', shape, tf.float32, tf.random_normal_initializer(stddev=std_dev))
         # weight_norm = tf.nn.l2_normalize(weight.initialized_value(), [0, 1, 2])
         convolution = tf.nn.conv2d(inputs, weight, [1, strides, strides, 1], 'SAME')
         bias = tf.get_variable('bias', dtype=tf.float32, shape=num_filters, initializer=tf.ones_initializer())
@@ -60,56 +55,25 @@ def createConvolution(name, inputs, size_filter, num_filters, strides=1, use_rel
 def createBottleneck(name, inputs, use_relu=True):
     shape = [1, 1, int(inputs.get_shape()[-1]), 1]
     with tf.variable_scope(name):
-        weight = tf.get_variable('weight', shape, tf.float32, tf.random_normal_initializer(0.05))
-        # weight_norm = tf.nn.l2_normalize(weight.initialized_value(), [0, 1, 2])
+        weight = tf.get_variable('weight', shape, tf.float32, tf.random_normal_initializer(stddev=std_dev))
         convolution = tf.nn.conv2d(inputs, weight, [1, 1, 1, 1], 'SAME')
-        # bias = createBias([1])
-        # convolution += bias
+        bias = tf.get_variable('bias', dtype=tf.float32, shape=[1], initializer=tf.ones_initializer())
+        convolution += bias
         if use_relu:
             convolution = non_linear(convolution)
     return convolution
 
 
-def loadImages(res):
-    files = os.listdir("images/")
+def loadImages(res, path):
+    files = os.listdir(path)
     images = []
     output = []
     validation = []
     val_out = []
     for f in files:
-        image = imread("images/" + f)
-
-        image = reshape(image, res)
-
-        # imshow('wabalaba dubdub', image)
-        # waitKey(0)
-        # destroyAllWindows()
-
-        if f.count('val') == 1:
-            validation.append(image)
-            validation.append(rotate_image(image))
-            if f.count('donald') == 0:
-                val_out.append([0, 1])
-                val_out.append([0, 1])
-            elif f.count('kermit') == 0:
-                val_out.append([1, 0])
-                val_out.append([1, 0])
-
-        else:
-            images.append(image)
-            images.append(rotate_image(image))
-            if f.count('donald') == 0:
-                """NO ES DONALD"""
-                output.append([0, 1])
-                output.append([0, 1])
-            elif f.count('kermit') == 0:
-                """NO ES KERMIT"""
-                output.append([1, 0])
-                output.append([1, 0])
+        handleImage(images, validation, f)
 
     return np.array(images), np.array(output), np.array(validation), np.array(val_out)
-
-
 
 
 def reshape(image, res, verbose=False):
@@ -137,9 +101,9 @@ def reshape(image, res, verbose=False):
 
 
     if verbose:
-        print "Height: ", len(new_image[0])
-        print "Width: ", len(new_image)
-        print "Channels: ", len(new_image[0][0])
+        print("Height: ", len(new_image[0]))
+        print("Width: ", len(new_image))
+        print("Channels: ", len(new_image[0][0]))
 
     return np.array(new_image)
 
@@ -172,10 +136,11 @@ def flatten_layer(layer):
 def filter_concat(name, filters):
     with tf.variable_scope(name):
         filterconcat = tf.zeros(filters[0].shape[1:])
+        num_channels = filters[0].get_shape()[-1]
         i = 0
         for filter in filters:
             with tf.variable_scope('filter_weight' + str(i)):
-                weight = tf.get_variable('weight', [1], tf.float32, tf.random_normal_initializer(0.05))
+                weight = tf.get_variable('weight', [num_channels], tf.float32, tf.random_normal_initializer(stddev=std_dev))
                 aux = tf.multiply(weight, filter)
                 filterconcat = tf.add(aux, filterconcat)
             i += 1
@@ -183,54 +148,86 @@ def filter_concat(name, filters):
     return filterconcat
 
 
-def createNetwork(listNames, previous, convolutions, fcnodes):
-    branch_prev = None
-    filter_list = []
-    for name in listNames:
-        if name.count('conv'):
-            conv = createConvolution(
-                name,
-                previous,
-                convolutions[name]['size_filter'],
-                convolutions[name]['num_filters']
-            )
-            previous = conv
+def createResConnection(name, residual, original):
+    with tf.variable_scope(name):
+        weight = tf.get_variable('weight', original.get_shape()[1:], tf.float32, tf.random_normal_initializer(stddev=std_dev))
+        res = tf.add(tf.multiply(original, weight), residual)
+        res = tf.nn.relu(res)
+        return res
 
-        if name.count('bottle'):
-            bottle = createBottleneck(
-                name,
-                previous
-            )
-            previous = bottle
 
-        if name.count('pool'):
-            pool = tf.nn.max_pool(
-                value=previous,
-                ksize=[1, 2, 2, 1],
-                strides=[1, 2, 2, 1],
-                padding='VALID'
-            )
-            previous = pool
+def createNetwork(name, listNames, previous, outputs, convolutions, fcnodes, reuse=None):
+    with tf.variable_scope(name, reuse=reuse):
+        net_dic = {'name': name}
+        branch_prev = None
+        filter_list = []
+        res_prev = None
+        convs = 0
+        bottles = 0
+        for name in listNames:
+            if name.count('conv'):
+                conv = createConvolution(
+                    name + str(convs),
+                    previous,
+                    convolutions[name + str(convs)]['size_filter'],
+                    convolutions[name + str(convs)]['num_filters'],
+                    use_relu=convolutions[name + str(convs)]['non_linear']
+                )
+                previous = conv
+                convs += 1
 
-        if name.count('filter'):
-            fil_con = filter_concat(name, filter_list)
-            previous = fil_con
-            branch_prev = None
+            if name.count('bottle'):
+                bottle = createBottleneck(
+                    name + str(bottles),
+                    previous
+                )
+                previous = bottle
+                bottles += 1
 
-        if name.count('branch'):
-            assert (branch_prev is None)
-            branch_prev = previous
+            if name.count('pool'):
+                pool = tf.nn.max_pool(
+                    value=previous,
+                    ksize=[1, 2, 2, 1],
+                    strides=[1, 2, 2, 1],
+                    padding='VALID'
+                )
+                previous = pool
 
-        if name.count('tie'):
-            filter_list.append(previous)
-            previous = branch_prev
+            if name.count('filter'):
+                fil_con = filter_concat(name, filter_list)
+                filter_list = []
+                previous = fil_con
+                branch_prev = None
 
-    previous, num_fea = flatten_layer(previous)
+            if name.count('branch'):
+                assert (branch_prev is None)
+                branch_prev = previous
 
-    for fc in fcnodes:
-        previous = createfc('fc' + str(fc), previous, fc)
+            if name.count('tie'):
+                filter_list.append(previous)
+                previous = branch_prev
 
-    return previous
+            if name.count('opres'):
+                assert (res_prev is None)
+                res_prev = previous
+
+            if name.count('closeres'):
+                previous = createResConnection(name, residual=previous, original=res_prev)
+
+        previous, num_fea = flatten_layer(previous)
+
+        for fc in fcnodes:
+            previous = createfc('fc' + str(fc), previous, fc, non_linear_use=(fc == fcnodes[-1]))
+
+
+        """LOSS FUNCTION"""
+        net_dic['output'] = previous
+        net_dic['softmax'] = tf.nn.softmax_cross_entropy_with_logits(logits=previous, labels=outputs)
+        net_dic['loss'] = tf.reduce_mean(net_dic['softmax'])
+        net_dic['optimizer'] = tf.train.AdamOptimizer(1e-5).minimize(net_dic['loss'])
+        net_dic['off'] = tf.reduce_sum(previous, 0)
+
+        return net_dic
 
 
 def rotate_image(image):
@@ -241,4 +238,5 @@ def rotate_image(image):
             rotated[i][j] = image[i][res - j - 1]
 
     return rotated
+
 
