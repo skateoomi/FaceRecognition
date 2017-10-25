@@ -1,12 +1,35 @@
 from mylibrary import *
 from random import random
 from math import floor
+from Network import *
 
-size_output = 2
+size_output = 5
 res = 50
 training_set_division = 1
 num_networks = 1
 actual_num_networks = num_networks
+
+# structure = ['conv', 'opres', 'conv', 'closeres',
+#              'branch', 'conv', 'bottle', 'tie', 'conv', 'conv', 'bottle', 'tie', 'filter',
+#              'pool1',
+#              'branch', 'conv', 'bottle', 'tie', 'conv', 'bottle', 'tie', 'conv', 'bottle', 'tie', 'filter2']
+structure = ['conv']
+#
+# num_filters = [64, 64,
+#                    128, 128, 128,
+#                    256, 256, 512]
+num_filters = [3]
+#
+# size_filters = [[11, 11], [7, 7],
+#                     [5, 5], [3, 1], [1, 3],
+#                     [3, 3], [3, 3], [3, 3]]
+size_filters = [[11, 11]]
+# non_linearities = [1, 1, 0,
+#                        1, 1, 1,
+#                        1, 1, 1]
+non_linearities = [1]
+
+fully_connected = [128, size_output]
 
 def start_train():
     global actual_num_networks
@@ -25,22 +48,28 @@ def start_train():
                 actual_inputs = image[i * int(num_images / training_set_division): (i + 1) * int(num_images / training_set_division)]
                 actual_outputs = output[i * int(num_images / training_set_division): (i + 1) * int(num_images / training_set_division)]
 
-                train = session.run([act_network['loss'], act_network['optimizer'],
-                                     accuracy, act_network['off']], feed_dict={
+                train = session.run([act_network.loss, act_network.optimizer,
+                                     accuracy, act_network.off, act_network.weight,
+                                     act_network.before_fc, act_network.output, act_network.softmax], feed_dict={
                     inputs: actual_inputs,
                     outputs: actual_outputs,
                     isTrain: True
                 })
-                # print(train[4])
+
                 if train[3][0] == 0 or train[3][1] == 0:
                     print("RESTART THE DEAD NETWORK: ", net)
-                    network[net] = createNetwork('network' + str(actual_num_networks), structure, inputs, outputs, convolutions, [2048, size_output])
-                    actual_num_networks += 1
-                    session.run(tf.global_variables_initializer())
+                    # network[net] = createNetwork('network' + str(actual_num_networks), structure, inputs, outputs, convolutions, [2048, size_output])
+                    # actual_num_networks += 1
+                    # session.run(tf.global_variables_initializer())
+                    exit(1)
                     return None
 
                 mean_acc += train[2] / training_set_division
                 mean_loss += train[0] / training_set_division
+
+            # if (epoch + 1) % 500 == 0:
+                # depictlearnt(session, np.array(image, dtype=np.float32), act_network['weight'])
+                # visualization = Visualize(session, act_network)
 
         """VALIDATE"""
         # val = session.run([accuracy, network[0]['loss'], ytrue, ypred], feed_dict={
@@ -48,6 +77,7 @@ def start_train():
         #     outputs: valoutput,
         #     isTrain: False
         # })
+
 
         print("Errors: %.4f" % mean_loss)
         # print("Errors: %.4f %.4f" % (mean_loss, val[1]))
@@ -68,35 +98,24 @@ if __name__ == "__main__":
     ytrue = tf.argmax(outputs, dimension=1)
 
     """LOAD THE DATA"""
-    image, output, valimage, valoutput = loadImages(res, "./images/")
+    image, output, valimage, valoutput = loadImages(res, "./numbers/")
     num_images = len(image)
     print("TRAINING NETWORK WITH ", num_images, " TRAINING IMAGES AND ", len(valimage), " VALIDATION IMAGES.")
     print ("___________________________________________________________")
     """CREATE NETWORK"""
-    num_filters = [64, 64,
-                   128, 128, 128,
-                   256, 256, 512]
-    size_filters = [[11, 11], [7, 7],
-                    [5, 5], [3, 1], [1, 3],
-                    [3, 3], [3, 3], [3, 3]]
-    non_linearities = [1, 1, 0,
-                       1, 1, 1,
-                       1, 1, 1]
     convolutions = {}
     for i in range(len(num_filters)):
         aux = {'size_filter': size_filters[i], 'num_filters': num_filters[i], 'non_linear': non_linearities[i]}
         convolutions['conv' + str(i)] = aux
 
-    structure = ['conv', 'opres', 'conv', 'closeres',
-                 'branch', 'conv', 'bottle', 'tie', 'conv', 'conv', 'bottle', 'tie', 'filter',
-                 'pool1',
-                 'branch', 'conv', 'bottle', 'tie', 'conv', 'bottle', 'tie', 'conv', 'bottle', 'tie', 'filter2']
+
 
     network = [0] * num_networks
+
     outs = []
     for network_num in range(num_networks):
-        network[network_num] = createNetwork('network' + str(network_num), structure, inputs, outputs, convolutions, [2048, size_output])
-        outs.append(network[network_num]['output'])
+        network[network_num] = Network('network' + str(network_num), structure, inputs, outputs, convolutions, fully_connected)
+        outs.append(network[network_num].output)
 
     """ACCURACY"""
     intermediate = tf.reduce_mean(outs, 0)
