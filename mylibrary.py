@@ -1,31 +1,54 @@
-import tensorflow as tf
 import os
 import numpy as np
-from imagehandler import handleImageDK, handleImageNumbers
-from cv2 import imread, imshow, waitKey, destroyAllWindows
+from image_handler import *
+from cv2 import imread, imshow, waitKey, destroyAllWindows, namedWindow, VideoCapture
+import cPickle as pk
+
+output_opts = ['soria', 'rob', 'omar', 'pouli', 'borja', '']
 
 
 def loadImages(res, path):
-    files = os.listdir(path)
+    print('Loading images...')
+    files_train = os.listdir(path + 'train/')
+    files_val = os.listdir(path + 'val/')
     images = []
     output = []
     validation = []
     val_out = []
+    if path.count('images') == 1:
+        size_out = 2
+        size_out = 6
+        picklename = './loaded_images/DK.p'
+    else:
+        size_out = 10
+        picklename = './loaded_images/numbers.p'
+    try:
+        aux = pk.load(open(picklename, 'rb'))
+        print('Using pickled array')
+        return aux['training_input'], aux['training_output'], aux['validation_input'], \
+               aux['validation_output'], size_out
+    except:
+        print('Non_exiting pickle, processing images...')
+        for f in files_train:
+            image = imread(path + 'train/' + f)
+            image = reshape(image, res)
+            handle_set(output_opts, f, image, images, output)
 
-    for f in files:
-        if (f.count('zero') == 0):
-            continue
-        image = imread(path + f)
+        for f in files_val:
+            image = imread(path + 'val/' + f)
+            image = reshape(image, res)
+            handle_set(output_opts, f, image, validation, val_out)
 
-        image = reshape(image, res)
-
-        imshow('wabalaba dubdub', image)
-        waitKey(0)
-        destroyAllWindows()
-        # handleImageDK(images, validation, f, image, output, val_out)
-        handleImageNumbers(images, f, image, output)
-
-    return np.array(images), np.array(output), np.array(validation), np.array(val_out)
+        images = np.array(images, dtype=np.float64)
+        validation = np.array(validation, dtype=np.float64)
+        images -= np.mean(images, axis=0)
+        validation -= np.mean(validation, axis=0)
+        images /= (np.std(images, axis=0) + 1e-11)
+        validation /= (np.std(validation, axis=0) + 1e-11)
+        pack = {'training_input': images, 'training_output': output, 'validation_input': validation,
+                'validation_output': val_out}
+        pk.dump(pack, open(picklename, 'wb'))
+        return images, np.array(output), validation, np.array(val_out), size_out
 
 
 def reshape(image, res, verbose=False):
@@ -51,25 +74,9 @@ def reshape(image, res, verbose=False):
             new_row.append(add_value)
         new_image.append(new_row)
 
-
     if verbose:
         print("Height: ", len(new_image[0]))
         print("Width: ", len(new_image))
         print("Channels: ", len(new_image[0][0]))
 
     return np.array(new_image)
-
-
-def rotate_image(image):
-    res = len(image[0])
-    rotated = np.zeros((res, res, 3))
-    for i in range(res):
-        for j in range(res):
-            rotated[i][j] = image[i][res - j - 1]
-
-    return rotated
-
-
-# def createDeconv():
-#     tf.nn.conv2d_transpose()
-

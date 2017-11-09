@@ -1,14 +1,26 @@
-import tensorflow as tf
+from cv2 import imshow, waitKey, destroyAllWindows
+from Convolution import *
+from FullyConnected import *
+from Bottleneck import *
+
+non_linear_conv = tf.nn.relu
+non_linear_fc = tf.nn.relu
+tftype = tf.float32
 
 
 class Network:
-    std_dev = 0.05
-    lmda = 1e-6
+    structure = []
+    lmda = 1e-5
 
-    def __init__(self, name, listNames, previous, outputs, convolutions, fcnodes, reuse=None):
-        self.non_linear_conv = tf.nn.relu
-        self.non_linear_fc = tf.nn.tanh
+    def __init__(self, name, size_out, res, listNames, convolutions, fcnodes, reuse=None):
         with tf.variable_scope(name, reuse=reuse):
+            self.session = tf.Session()
+            self.size_output = size_out
+            """PLACE HOLDER INIT"""
+            self.inputs = tf.placeholder(dtype=tf.float32, shape=(None, res, res, 3), name='inputs')
+            self.outputs = tf.placeholder(dtype=tf.float32, shape=(None, self.size_output), name='outputs')
+            previous = self.inputs
+            """CREATE"""
             branch_prev = None
             filter_list = []
             res_prev = None
@@ -16,24 +28,25 @@ class Network:
             bottles = 0
             for name in listNames:
                 if name.count('conv'):
-
-                    conv = self._createConvolution(
+                    conv = Convolution(
                         name=name + str(convs),
                         inputs=previous,
                         size_filter=convolutions[name + str(convs)]['size_filter'],
                         num_filters=convolutions[name + str(convs)]['num_filters'],
-                        use_relu=convolutions[name + str(convs)]['non_linear']
+                        use_relu=convolutions[name + str(convs)]['non_linear'],
+                        non_linear_f=non_linear_conv,
+                        tftype=tftype
                     )
-                    previous = conv['conv']
-                    self.weight = conv['weight']
+                    previous = conv.convolution
                     convs += 1
 
                 if name.count('bottle'):
-                    bottle = self._createBottleneck(
+                    previous = Bottleneck(
                         name + str(bottles),
-                        previous
-                    )
-                    previous = bottle
+                        previous,
+                        tftype=tftype,
+                        non_linear_f=non_linear_conv
+                    ).convolution
                     bottles += 1
 
                 if name.count('pool'):
@@ -70,51 +83,34 @@ class Network:
             self.before_fc = previous
 
             for fc in fcnodes:
-                previous = self._createfc('fc' + str(fc), previous, fc, non_linear_use=(fc == fcnodes[-1]))
+                previous = FullyConnected('fc' + str(fc), previous, fc, tftype=tftype,
+                                          non_linear_f=non_linear_fc, non_linear_use=True).output
+
+            previous = FullyConnected('fc' + str(self.size_output), previous, self.size_output,
+                                      tftype=tftype, non_linear_f=non_linear_fc, non_linear_use=True).output
+
 
             """LOSS FUNCTION"""
             self.output = previous
-            self.softmax = tf.nn.softmax_cross_entropy_with_logits(logits=previous, labels=outputs)
+            self.softmax = tf.nn.softmax_cross_entropy_with_logits(logits=previous, labels=self.outputs)
             self.loss = tf.reduce_mean(self.softmax)
             self.optimizer = tf.train.AdamOptimizer(self.lmda).minimize(self.loss)
             self.off = tf.reduce_sum(previous, 0)
+            self.gradients_to_fc = tf.gradients(self.loss, self.before_fc)
 
-    def _createfc(self, name, inputs, num_outputs, non_linear_use=True):
-        num_inputs = inputs.get_shape()[-1]
-        with tf.variable_scope(name):
-            weight = tf.get_variable('weight', [num_inputs, num_outputs], tf.float32,
-                                     tf.random_normal_initializer(stddev=self.std_dev))
-            bias = tf.get_variable('bias', [num_outputs], tf.float32, tf.ones_initializer())
-            output = tf.matmul(inputs, weight)
-            output += bias
-            if non_linear_use:
-                output = self.non_linear_fc(output)
-        return output
+            """ACCURACY"""
+            ytrue = tf.argmax(self.outputs, axis=1)
+            intermediate = tf.reduce_mean([self.output], 0)
+            ypred = tf.argmax(tf.nn.softmax(intermediate), axis=1)
+            self.accuracy = tf.reduce_mean(tf.cast(tf.equal(ypred, ytrue), tftype))
 
-    def _createConvolution(self, name, inputs, size_filter, num_filters, strides=1, use_relu=True):
-        shape = [size_filter[0], size_filter[1], int(inputs.get_shape()[-1]), num_filters]
-        with tf.variable_scope(name):
-            weight = tf.get_variable('weight', shape, tf.float32, tf.random_normal_initializer(stddev=self.std_dev))
-            convolution = tf.nn.conv2d(inputs, weight, [1, strides, strides, 1], 'SAME')
-            bias = tf.get_variable('bias', dtype=tf.float32, shape=num_filters, initializer=tf.ones_initializer())
-            convolution += bias
+            self.session.run(tf.global_variables_initializer())
 
-            if use_relu:
-
-                convolution = self.non_linear_conv(convolution)
-
-            return {'conv': convolution, 'weight': weight}
-
-    def _createBottleneck(self, name, inputs, use_relu=True):
-        shape = [1, 1, int(inputs.get_shape()[-1]), 1]
-        with tf.variable_scope(name):
-            weight = tf.get_variable('weight', shape, tf.float32, tf.random_normal_initializer(stddev=self.std_dev))
-            convolution = tf.nn.conv2d(inputs, weight, [1, 1, 1, 1], 'SAME')
-            bias = tf.get_variable('bias', dtype=tf.float32, shape=[1], initializer=tf.ones_initializer())
-            convolution += bias
-            if use_relu:
-                convolution = self.non_linear_conv(convolution)
-        return convolution
+    def __call__(self, *args, **kwargs):
+        return self.session.run(args[0], feed_dict={
+            self.inputs: kwargs['input'],
+            self.outputs: kwargs['output']
+        })
 
     def _flatten_layer(self, layer):
         # Get the shape of the input layer.
@@ -141,27 +137,39 @@ class Network:
         return layer_flat, num_features
 
     def _filter_concat(self, name, filters):
+        global non_linear_conv
         with tf.variable_scope(name):
             filterconcat = tf.zeros(filters[0].shape[1:])
             num_channels = filters[0].get_shape()[-1]
             i = 0
             for filter in filters:
                 with tf.variable_scope('filter_weight' + str(i)):
-                    weight = tf.get_variable('weight', [num_channels], tf.float32,
+                    weight = tf.get_variable('weight', [num_channels], tftype,
                                              tf.random_normal_initializer(stddev=self.std_dev))
                     aux = tf.multiply(weight, filter)
                     filterconcat = tf.add(aux, filterconcat)
                 i += 1
-            filterconcat = self.non_linear_conv(filterconcat)
+            filterconcat = non_linear_conv(filterconcat)
         return filterconcat
 
     def _createResConnection(self, name, residual, original):
         with tf.variable_scope(name):
-            weight = tf.get_variable('weight', original.get_shape()[1:], tf.float32,
+            weight = tf.get_variable('weight', original.get_shape()[1:], tftype,
                                      tf.random_normal_initializer(stddev=self.std_dev))
             res = tf.add(tf.multiply(original, weight), residual)
             res = tf.nn.relu(res)
             return res
 
-    def depictlearnt(self, session, image, weight):
-        sol = np.array(session.run(self.non_linear_conv(tf.nn.conv2d(image, weight, [1, 1, 1, 1], 'SAME'))))[0]
+    def depictlearnt(self, image, weight):
+        return np.array(self.session.run(self.non_linear_conv(tf.nn.conv2d(image, weight, [1, 1, 1, 1], 'SAME'))))[0]
+
+    def deconv_net(self, target, res):
+        randomImage = np.random.rand(1, res, res, 3)
+        target = [self.session.run(tf.one_hot(target, self.size_output))]
+        for i in range(2):
+            grad, loss = self([tf.gradients(self.loss, self.inputs), self.loss], input=randomImage, output=target)
+            randomImage = randomImage - grad[0]
+            print loss
+        imshow('New image', randomImage[0])
+        waitKey(0)
+        destroyAllWindows()

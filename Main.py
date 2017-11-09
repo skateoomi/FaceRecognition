@@ -1,130 +1,120 @@
 from mylibrary import *
-from random import random
-from math import floor
 from Network import *
+import time
+import matplotlib.pyplot as plt
 
-size_output = 5
-res = 50
-training_set_division = 1
+path = "./numbers/"
+res = 150
+training_set_division = 10
 num_networks = 1
 actual_num_networks = num_networks
 
-# structure = ['conv', 'opres', 'conv', 'closeres',
-#              'branch', 'conv', 'bottle', 'tie', 'conv', 'conv', 'bottle', 'tie', 'filter',
-#              'pool1',
-#              'branch', 'conv', 'bottle', 'tie', 'conv', 'bottle', 'tie', 'conv', 'bottle', 'tie', 'filter2']
-structure = ['conv']
-#
-# num_filters = [64, 64,
-#                    128, 128, 128,
-#                    256, 256, 512]
-num_filters = [3]
-#
-# size_filters = [[11, 11], [7, 7],
-#                     [5, 5], [3, 1], [1, 3],
-#                     [3, 3], [3, 3], [3, 3]]
-size_filters = [[11, 11]]
-# non_linearities = [1, 1, 0,
-#                        1, 1, 1,
-#                        1, 1, 1]
-non_linearities = [1]
+structure = ['conv', 'bottle', 'conv', 'bottle', 'pool', 'conv', 'bottle', 'pool', 'conv', 'bottle', 'conv', 'pool']
+num_filters = [8, 8, 8, 32, 32]
+size_filters = [[11, 1], [1, 11], [7, 7], [5, 1], [1, 5]]
+strides = []
+non_linearities = [1, 1, 1, 1, 1]
+fully_connected = []
 
-fully_connected = [128, size_output]
 
 def start_train():
     global actual_num_networks
-
+    accuracy_track_train = []
+    accuracy_track_val = []
+    loss_track_train = []
+    loss_track_val = []
     for epoch in range(2000):
-        value = int(floor(random() * num_images))
         print("Epoch: ", epoch)
         mean_acc = 0
         mean_loss = 0
         for net in range(len(network)):
-
             act_network = network[net]
-            # print act_network['name']
             for i in range(training_set_division):
                 """TRAIN"""
-                actual_inputs = image[i * int(num_images / training_set_division): (i + 1) * int(num_images / training_set_division)]
-                actual_outputs = output[i * int(num_images / training_set_division): (i + 1) * int(num_images / training_set_division)]
+                actual_inputs = image[i * int(num_images / training_set_division): (i + 1) * int(
+                    num_images / training_set_division)]
+                actual_outputs = output[i * int(num_images / training_set_division): (i + 1) * int(
+                    num_images / training_set_division)]
 
-                train = session.run([act_network.loss, act_network.optimizer,
-                                     accuracy, act_network.off, act_network.weight,
-                                     act_network.before_fc, act_network.output, act_network.softmax], feed_dict={
-                    inputs: actual_inputs,
-                    outputs: actual_outputs,
-                    isTrain: True
-                })
+                data_interested_in = {
+                    'loss': act_network.loss,
+                    'optimizer': act_network.optimizer,
+                    'accuracy': act_network.accuracy,
+                    'off': act_network.off,
+                    'before fc': act_network.before_fc,
+                    'output': act_network.output,
+                    'softmax': act_network.softmax,
+                    'gradients to before fc': act_network.gradients_to_fc
+                }
 
-                if train[3][0] == 0 or train[3][1] == 0:
-                    print("RESTART THE DEAD NETWORK: ", net)
-                    # network[net] = createNetwork('network' + str(actual_num_networks), structure, inputs, outputs, convolutions, [2048, size_output])
-                    # actual_num_networks += 1
-                    # session.run(tf.global_variables_initializer())
-                    exit(1)
-                    return None
+                train = act_network(data_interested_in, input=actual_inputs, output=actual_outputs)
 
-                mean_acc += train[2] / training_set_division
-                mean_loss += train[0] / training_set_division
+                if (epoch + 1) % 250 == 0:
+                    act_network.deconv_net(0, res)
 
-            # if (epoch + 1) % 500 == 0:
-                # depictlearnt(session, np.array(image, dtype=np.float32), act_network['weight'])
-                # visualization = Visualize(session, act_network)
+                mean_acc += train['accuracy'] / training_set_division
+                mean_loss += train['loss'] / training_set_division
 
-        """VALIDATE"""
-        # val = session.run([accuracy, network[0]['loss'], ytrue, ypred], feed_dict={
-        #     inputs: valimage,
-        #     outputs: valoutput,
-        #     isTrain: False
-        # })
+            """VALIDATE"""
+            data_interested_in = {
+                'accuracy': act_network.accuracy,
+                'loss': act_network.loss
+            }
 
+            val = act_network(data_interested_in, input=valimage, output=valoutput)
 
-        print("Errors: %.4f" % mean_loss)
-        # print("Errors: %.4f %.4f" % (mean_loss, val[1]))
-        # print "FC2: ", train[2][0]
-        print("Accuracy(%%): %.1f" % (mean_acc * 100))
-        # print("Accuracy(%%): %.1f %.1f" % (mean_acc * 100, val[0] * 100))
-        # print "Difference: ", val[2], " ", val[3]
+        accuracy_track_train.append(mean_acc)
+        accuracy_track_val.append(val['accuracy'] * 100)
+        loss_track_train.append(mean_loss)
+        loss_track_val.append(val['loss'])
+        plt.subplot(2, 2, 1)
+        plt.cla()
+        plt.plot(accuracy_track_train)
+        plt.subplot(2, 2, 2)
+        plt.cla()
+        plt.plot(accuracy_track_val)
+        plt.subplot(2, 2, 3)
+        plt.cla()
+        plt.plot(loss_track_train)
+        plt.subplot(2, 2, 4)
+        plt.cla()
+        plt.plot(loss_track_val)
+        plt.draw()
+        plt.pause(0.000000000000001)
+        # print("Errors: %.4f" % mean_loss)
+        print("Errors: %.4f %.4f" % (mean_loss, val['loss']))
+        # print("Accuracy(%%): %.1f" % (mean_acc * 100))
+        print("Accuracy(%%): %.1f %.1f" % (mean_acc * 100, val['accuracy'] * 100))
         print("------------------------------------------------------------")
 
 
+    return True
+
+
 if __name__ == "__main__":
-    session = tf.Session()
-
-    """PLACE HOLDER INIT"""
-    inputs = tf.placeholder(dtype=tf.float32, shape=(None, res, res, 3), name='inputs')
-    outputs = tf.placeholder(dtype=tf.float32, shape=(None, size_output), name='outputs')
-    isTrain = tf.placeholder(dtype=tf.bool, shape=(), name='isTrain')
-    ytrue = tf.argmax(outputs, dimension=1)
-
+    t_before = time.time()
     """LOAD THE DATA"""
-    image, output, valimage, valoutput = loadImages(res, "./numbers/")
+    image, output, valimage, valoutput, size_output = loadImages(res, path)
+    print('Load took ' + str(time.time()-t_before) + 's')
     num_images = len(image)
     print("TRAINING NETWORK WITH ", num_images, " TRAINING IMAGES AND ", len(valimage), " VALIDATION IMAGES.")
     print ("___________________________________________________________")
+
     """CREATE NETWORK"""
     convolutions = {}
     for i in range(len(num_filters)):
-        aux = {'size_filter': size_filters[i], 'num_filters': num_filters[i], 'non_linear': non_linearities[i]}
+        aux = {'size_filter': size_filters[i],
+               'num_filters': num_filters[i],
+               'non_linear': non_linearities[i]
+
+        }
         convolutions['conv' + str(i)] = aux
-
-
 
     network = [0] * num_networks
 
-    outs = []
     for network_num in range(num_networks):
-        network[network_num] = Network('network' + str(network_num), structure, inputs, outputs, convolutions, fully_connected)
-        outs.append(network[network_num].output)
-
-    """ACCURACY"""
-    intermediate = tf.reduce_mean(outs, 0)
-    ypred = tf.argmax(tf.nn.softmax(intermediate), dimension=1)
-    accuracy = tf.reduce_mean(tf.cast(tf.equal(ypred, ytrue), tf.float32))
-
-    session.run(tf.global_variables_initializer())
+        network[network_num] = Network('network' + str(network_num), size_output, res, structure, convolutions, fully_connected)
 
     while start_train() is None:
         print('RESTARTING...')
         print('_______________________________________________________')
-
